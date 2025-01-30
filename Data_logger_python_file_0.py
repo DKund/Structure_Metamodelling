@@ -1,41 +1,35 @@
 # ------------------------------------------------------------------------------
-# IMPORT NECESSARY PACKAGES.
+# PACKAGES:
 # ------------------------------------------------------------------------------
 import serial
 import time
 import csv
 import sys
-import random
 import numpy as np
-from math import inf
+import pandas as pd
 from collections import deque
 
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-from matplotlib.patches import FancyBboxPatch
-import seaborn as sns
-from matplotlib.widgets import Button
+import pyqtgraph as pg
+from PyQt5.QtWidgets import QApplication, QMainWindow
+from pyqtgraph.Qt import QtCore
+from PyQt5.QtGui import QFont
+
 
 # ------------------------------------------------------------------------------
-# INITIALIZED EMPTY CONTAINERS.
+# INITIALIZATION INFO:
 # ------------------------------------------------------------------------------
 duration = int(input('Enter the duration in seconds for data logging: '))
-refinement = 1
+sampling_rate = 50
+delay_time = int(1000/sampling_rate)
 
-start_time = []
+pg.setConfigOptions(useOpenGL=True)
+pg.setConfigOptions(antialias=True)
+pg.setConfigOption('background', 'k')
+pg.setConfigOption('foreground', '#82e0aa')
 
-time_val_list = deque(maxlen = 800)
-load_val_list = deque(maxlen = 800)
-deflection_val_list = deque(maxlen = 800)
-
-# sub_deflection_list = []
-
-# final_time_list = []
-# final_load_list = []
-# final_deflection_list = []
 
 # ------------------------------------------------------------------------------
-# INITIALIZED SERIAL PORTS.
+# INITIALIZED SERIAL PORTS:
 # ------------------------------------------------------------------------------
 def initialize_serial(port_name, 
                       baud_rate = 9600, 
@@ -52,6 +46,7 @@ def initialize_serial(port_name,
     except Exception as e:
         print(f"[ERROR] Unexpected error while opening {port_name}: {e}")
         sys.exit(1)
+
 
 # ------------------------------------------------------------------------------
 # READ DATA FROM SENSORS.
@@ -74,167 +69,164 @@ def read_sensor_data(serial_connection):
         print(f"[ERROR] Unexpected error during data read: {e}")
         return None
 
+
 # ------------------------------------------------------------------------------
-# INITIALIZE PLOTS FOR VISUALIZING THE (SYNTHETIC)SENSOR DATA.
+# (SYNTHETIC)SENSOR DATA: (NOISY + CLEAN).
 # ------------------------------------------------------------------------------
-def load_deflection_val():
-    load = np.random.normal(0, 100)
-    deflection = np.random.normal(0, 10)
-    elapsed_time = time.time() - start_time[0]
-    
-    deflection_val_list.append(deflection)
-    load_val_list.append(load)
-    time_val_list.append(elapsed_time)
-    return
+data_frame_sensor_data = pd.read_csv('data_logger(synthetic_data).csv')
 
-def synthetic_sensor_data():
-    load_deflection_val()
-    return
-    # if len(sub_deflection_list) == refinement:
-    #     sub_deflection_list.clear()
-    #     load_deflection_val()
-    # else:
-    #     if len(sub_deflection_list) < refinement:
-    #         if len(deflection_val_list) == 0:
-    #             i = 1
-    #             while True:
-    #                 load_deflection_val()
-    #                 if i%2 == 0:
-    #                     break
-    #                 i = i+1
-    #         else:
-    #             x2 = deflection_val_list[-1]
-    #             l2 = load_val_list[-1]
-    #             t2 = time_val_list[-1]
+class RealTimePlot(QMainWindow):
+    def __init__(self):
+        super().__init__()
 
-    #             x1 = deflection_val_list[-2]
-    #             l1 = load_val_list[-2]
-    #             t1 = time_val_list[-2]
+        self.setWindowTitle('Displacement Time Plot')
+        self.resize(1000, 600)
 
-    #             for i in range(0, refinement, 1):
-    #                 sub_deflection_val = x1 + ((x2 - x1) / refinement) * (len(sub_deflection_list) - 1)
-    #                 sub_deflection_list.append(sub_deflection_val)
-    #                 final_deflection_list.append(sub_deflection_val)
+        self.plot_layout = pg.GraphicsLayoutWidget()
+        self.setCentralWidget(self.plot_layout)
+        
+        self.plot_displacement = self.plot_layout.addPlot(row=0, col=0)
+        self.plot_load         = self.plot_layout.addPlot(row=1, col=0)
 
-    #                 sub_load_val = l1 + ((l2 - l1) / refinement) * (len(sub_deflection_list) - 1)
-    #                 final_load_list.append(sub_load_val)
 
-    #                 sub_time_val = t1 + ((t2 - t1) / refinement) * (len(sub_deflection_list) - 1)
-    #                 final_time_list.append(sub_time_val)
-    #                 return
+        # ------------------------------------------------------------------------------
+        # CONFIGURE DISPLACEMENT VS TIME PLOT:
+        # ------------------------------------------------------------------------------
+        self.plot_displacement.setLabel ('left', 'Displacement', units='mm', **{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.plot_displacement.setLabel ('bottom', 'Time', units='s', **{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.plot_displacement.showGrid(x=True, y=True, alpha=0.4)
+        self.plot_displacement.setTitle('Displacement Vs Time', size='12pt')
 
-sns.set_theme(style = 'darkgrid')
-custom_style = {
-    'grid.color': 'white',
-    'grid.alpha': 0.5
-}
-sns.set_style(custom_style)
-fig, ax = plt.subplots(2, 1, figsize=(10, 8), dpi=120)
 
-(line_deflection1,) = ax[0].plot([], [], color='cornflowerblue', lw=4, alpha=0.2)
-(line_deflection,) = ax[0].plot([], [], label='Deflection (mm)', color='royalblue', lw=.5, alpha=1)
-ax[0].set_title("Real-time LOAD and DEFLECTION DATA", fontweight='bold')
-ax[0].set_ylabel("DEFLECTION (mm)", fontweight='bold')
-ax[0].legend(loc = 'upper left')
-ax[0].grid(True)
+        # ------------------------------------------------------------------------------
+        # CONFIGURE LOAD VS TIME PLOT:
+        # ------------------------------------------------------------------------------
+        self.plot_load.setLabel ('left', 'Load', units='kN', **{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.plot_load.setLabel ('bottom', 'Time', units='s', **{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.plot_load.showGrid(x=True, y=True, alpha=0.4)
+        self.plot_load.setTitle('Load Vs Time', size='12pt')
 
-(line_load1,)       = ax[1].plot([], [], color='palevioletred', lw=4, alpha=0.2)
-(line_load,)        = ax[1].plot([], [], label='Load (KN)', color='crimson', lw=.5, alpha=1)
-ax[1].set_xlabel("Time (s)", fontweight='bold')
-ax[1].set_ylabel("LOAD (KN)", fontweight='bold')
-ax[1].legend(loc = 'upper left')
-ax[1].grid(True)
 
-def init():
-    line_deflection1.set_data([], [])
-    line_deflection.set_data([], [])
-    
-    line_load1.set_data([], [])
-    line_load.set_data([], [])
-    
-    return line_deflection, line_load
+        # ------------------------------------------------------------------------------
+        # CONFIGURE PLOT TICKS AXES:
+        # ------------------------------------------------------------------------------
+        plot_list = [self.plot_displacement,
+                     self.plot_load]
+        axis_font = QFont()
+        axis_font.setBold(True)
+        for p_item in plot_list:
+            p_item.getAxis('left').setStyle(tickFont = axis_font)
+            p_item.getAxis('bottom').setStyle(tickFont = axis_font)
+        
 
-def update(frame):
-    start_time.append(time.time())
-    synthetic_sensor_data()
-    
-    line_deflection1.set_data(time_val_list, deflection_val_list)
-    line_deflection.set_data(time_val_list, deflection_val_list)
-    
-    line_load1.set_data(time_val_list, load_val_list)
-    line_load.set_data(time_val_list, load_val_list)
-    
-    # ax[0].set_autoscale_on(False)
-    # ax[0].set_xlim(0, duration)
-    # ax[0].set_ylim(-100, 100)
+        # ------------------------------------------------------------------------------
+        # PLOT DISPLACEMENT VS TIME AND LOAD VS TIME CURVE:
+        # ------------------------------------------------------------------------------
+        self.plot_displacement.addLegend(**{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.plot_load.addLegend(**{
+            'font-size': '10pt',
+            'font-family': 'Square',
+            'color': '#82e0aa'
+        })
+        self.curve_displacement = self.plot_displacement.plot([], [],
+                                           pen=pg.mkPen(('#e74c3c'),
+                                                        width = 2),
+                                           name = 'Sensor Displacement(mm)')
+        self.curve_load = self.plot_load.plot([], [],
+                                           pen=pg.mkPen(('#f39c12'),
+                                                        width = 2),
+                                           name = 'Sensor Load(kN)')
 
-    # ax[1].set_autoscale_on(False)
-    # ax[1].set_xlim(0, duration)
-    # ax[1].set_ylim(-500, 500)
+        self.time_data = deque(maxlen = 500)
+        self.displacement_data = deque(maxlen = 500)
+        self.load_data = deque(maxlen = 500)
 
-    ax[0].relim()
-    ax[0].autoscale_view()
+        self.start_time = time.time()
+        
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(delay_time)
+        self.timer.timeout.connect(self.update_plot)
+        self.timer.start()
+        self.index_val = 0
 
-    ax[1].relim()
-    ax[1].autoscale_view()
+    def update_plot(self):
+        load_val       = data_frame_sensor_data.iloc[self.index_val, 0]
+        displacement_val = data_frame_sensor_data.iloc[self.index_val, 1]
+        current_time = time.time() - self.start_time
+        
+        self.time_data.append(current_time)
+        self.displacement_data.append(displacement_val)
+        self.load_data.append(load_val)
 
-    try:
-        output_filename = 'vibration_data_log.csv'      
-        if len(time_val_list) == 1:
-            print(f"[INFO] Logging data to {output_filename}...")
-            with open(output_filename, mode='w', newline='') as csv_file:
-                csv_writer = csv.writer(csv_file)
-                csv_writer.writerow(["Timestamp (seconds)", 
-                                        "Load (Newton)", 
-                                        "Deflection (mm)"])
-                csv_writer.writerow([f'{time_val_list[-1]:.3f}',
-                                        f'{load_val_list[-1]:.3f}',
-                                        f'{deflection_val_list[-1]:.3f}'])
-        else:
-            if (len(time_val_list)%refinement >= 0):
-                with open(output_filename, mode='a', newline='') as csv_file:
+        self.curve_displacement.setData(self.time_data, self.displacement_data)
+        self.curve_load.setData(self.time_data, self.load_data)
+        self.index_val += 1
+
+        if self.time_data[-1] >= duration:
+            self.timer.stop()
+
+        try:
+            output_filename = 'vibration_data_log.csv'      
+            if len(self.time_data) == 1:
+                
+                print(f"[INFO] Logging data to {output_filename}...")
+                
+                with open(output_filename, mode='w', newline='') as csv_file:
                     csv_writer = csv.writer(csv_file)
-                    csv_writer.writerow([f'{time_val_list[-1]:.3f}',
-                                         f'{load_val_list[-1]:.3f}',
-                                         f'{deflection_val_list[-1]:.3f}'])
-                    return line_deflection, line_load
+                    csv_writer.writerow(["Timestamp (seconds)", 
+                                            "Load (Newton)", 
+                                            "Deflection (mm)"])
+                    csv_writer.writerow([f'{self.time_data[-1]:.3f}',
+                                         f'{self.load_data[-1]:.3f}',
+                                         f'{self.displacement_data[-1]:.3f}'])
+            else:
+                if (len(self.time_data) > 0):
+                    with open(output_filename, mode='a', newline='') as csv_file:
+                        csv_writer = csv.writer(csv_file)
+                        csv_writer.writerow([f'{self.time_data[-1]:.3f}',
+                                             f'{self.load_data[-1]:.3f}',
+                                             f'{self.displacement_data[-1]:.3f}'])
+                        
+        except IOError as e:
+            print(f"[ERROR] Could not write to file {output_filename}: {e}")
 
-    except IOError as e:
-        print(f"[ERROR] Could not write to file {output_filename}: {e}")
-    
-    except Exception as e:
-        print(f"[ERROR] Unexpected error during file operations: {e}")
+        except Exception as e:
+            print(f"[ERROR] Unexpected error during file operations: {e}")
 
+        finally:
+            # if (len(self.time_data) > 0):
+            if self.time_data[-1] >= duration:
+                print(f'[INFO]: DATA LOGGING COMPLETED')
+
+
+# ----------------------------------------------------------------------------------
+# MAIN FUNCTION:
+# ----------------------------------------------------------------------------------
 def main():
-
-    # ------------------------------------------------------------------------------
-    # PLOT INITIALIZATION (ANIMATION)
-    # ------------------------------------------------------------------------------
-    ani = animation.FuncAnimation(fig,
-    update,
-    init_func=init,
-    interval = 1,
-    frames = 60,
-    blit=False)
-
-    # ------------------------------------------------------------------------------
-    # STOP PLOTTING (ANIMATION)
-    # ------------------------------------------------------------------------------
-    def stop_animation(event):
-        if len(time_val_list) > 0:
-            if (time_val_list[-1] > duration) and (len(time_val_list) > 0):
-                ani.event_source.stop()
-    ani._fig.canvas.mpl_connect('draw_event', stop_animation)
-    plt.show()
-    # load_port = 'COM3' #Port for Load Sensor
-    # deflection_port = 'COM4' # Port for Deflection Sensor
-    # baud_rate = 9600 # Baud rate for both sensors: Data transfer in bits/second
-    # load_serial = initialize_serial(load_port, 
-    #                                 baud_rate)
-    # deflection_serial = initialize_serial(deflection_port, 
-    #                                       baud_rate)
-    # load_value = read_sensor_data(load_serial)
-    # deflection_value = read_sensor_data(deflection_serial)
+    app = QApplication(sys.argv)
+    window = RealTimePlot()
+    window.show()
+    sys.exit(app.exec_())
 
 if __name__ == '__main__':
     main()
